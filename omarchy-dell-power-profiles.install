@@ -1,0 +1,35 @@
+reload_platform_profile_rules() {
+  if [[ ! -x /usr/bin/udevadm || ! -S /run/udev/control ]]; then
+    return 0
+  fi
+
+  /usr/bin/udevadm control --reload-rules || echo ":: Unable to reload udev rules for Dell power profiles." >&2
+  /usr/bin/udevadm trigger --action=add --subsystem-match=platform-profile ||
+    echo ":: Unable to reapply Dell platform-profile permissions; they will be applied after reboot." >&2
+  /usr/bin/udevadm settle || true
+}
+
+restore_platform_profile_permissions() {
+  local profile_dir
+
+  for profile_dir in /sys/class/platform-profile/*; do
+    [[ -r $profile_dir/name && -e $profile_dir/profile ]] || continue
+    [[ $(<"$profile_dir/name") == "dell-pc" ]] || continue
+
+    /usr/bin/chgrp root "$profile_dir/profile" 2>/dev/null || true
+    /usr/bin/chmod g-w "$profile_dir/profile" 2>/dev/null || true
+  done
+}
+
+post_install() {
+  reload_platform_profile_rules
+}
+
+post_upgrade() {
+  reload_platform_profile_rules
+}
+
+post_remove() {
+  restore_platform_profile_permissions
+  reload_platform_profile_rules
+}

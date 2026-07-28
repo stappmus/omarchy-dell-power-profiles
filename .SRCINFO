@@ -1,0 +1,26 @@
+pkgbase = omarchy-dell-power-profiles
+	pkgdesc = Dell firmware power-profile provider for Omarchy
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/basecamp/omarchy/pull/6346
+	install = omarchy-dell-power-profiles.install
+	arch = any
+	license = MIT
+	depends = bash
+	depends = power-profiles-daemon
+	depends = systemd
+	options = !debug
+	source = omarchy-dell-power-profiles
+	source = 99-omarchy-dell-platform-profile.rules
+	source = omarchy-dell-power-profiles.install
+	source = provider-test.sh
+	source = README.md
+	source = LICENSE
+	sha256sums = 691be6a79e823074573baa52fbef71174986c52e38482c1cc1160ab1e9ca414e
+	sha256sums = f3e910a2da1c0dd0318575cf37f1418eabd3deb8a5da5b83618f19ecaf912ad1
+	sha256sums = d1e779da734452ea17ca221abeac5c4425c5fda79e05f384af4ca0da401eae49
+	sha256sums = 35129170ec70c398edcd04f70164aa9247cb19d065ec2a79010e0d1d853efa32
+	sha256sums = cc914a7c1d9c12c8194b11e741f8c6e6cd95d1cf9f7f007bc03379c12248a8a6
+	sha256sums = e728f356916d5e91693e02eb9e7e1f79289c2ca61e59bd35a45da10ee02fa3b3
+
+pkgname = omarchy-dell-power-profiles

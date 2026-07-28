@@ -1,0 +1,240 @@
+#!/bin/bash
+
+set -uo pipefail
+
+profile_root="${OMARCHY_PLATFORM_PROFILE_ROOT:-/sys/class/platform-profile}"
+state_dir="${OMARCHY_POWERPROFILES_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles}"
+
+usage() {
+  local status=${1:-1}
+
+  echo "Usage: omarchy-dell-power-profiles probe | list [--active-state] | set [autodetect|ac|battery] [quiet|cool|balanced|performance]" >&2
+  exit "$status"
+}
+
+find_dell_profile_dir() {
+  local candidate
+
+  for candidate in "$profile_root"/*; do
+    [[ -r $candidate/name && -r $candidate/choices && -r $candidate/profile && -w $candidate/profile ]] || continue
+    [[ $(<"$candidate/name") == "dell-pc" ]] || continue
+
+    printf '%s\n' "$candidate"
+    return 0
+  done
+
+  return 1
+}
+
+firmware_profile_available() {
+  local profile=$1
+  shift
+
+  [[ " $* " == *" $profile "* ]]
+}
+
+os_profile_for() {
+  case "$1" in
+    quiet | cool) printf 'power-saver\n' ;;
+    balanced | performance) printf '%s\n' "$1" ;;
+    *) return 1 ;;
+  esac
+}
+
+os_profile_available() {
+  local output=$1
+  local profile=$2
+
+  grep -Eq "^[*[:space:]]+${profile}:$" <<<"$output"
+}
+
+list_profiles() {
+  local option=${1:-}
+  local dell_profile_dir
+  local os_profile_output
+  local current_firmware
+  local current_os=""
+  local profile
+  local os_profile
+  local active
+  local -a firmware_profiles
+
+  [[ -z $option || $option == "--active-state" ]] || {
+    echo "Usage: omarchy-dell-power-profiles list [--active-state]" >&2
+    return 1
+  }
+
+  dell_profile_dir=$(find_dell_profile_dir) || return 1
+  os_profile_output=$(powerprofilesctl list 2>/dev/null) || return 1
+  read -r -a firmware_profiles <"$dell_profile_dir/choices"
+  current_firmware=$(<"$dell_profile_dir/profile")
+
+  if [[ $option == "--active-state" ]]; then
+    current_os=$(powerprofilesctl get 2>/dev/null) || return 1
+  fi
+
+  for profile in quiet cool balanced performance; do
+    firmware_profile_available "$profile" "${firmware_profiles[@]}" || continue
+    os_profile=$(os_profile_for "$profile") || continue
+    os_profile_available "$os_profile_output" "$os_profile" || continue
+
+    if [[ $option == "--active-state" ]]; then
+      active=0
+      [[ $profile == "$current_firmware" && $os_profile == "$current_os" ]] && active=1
+      printf '%s\t%s\n' "$profile" "$active"
+    else
+      printf '%s\n' "$profile"
+    fi
+  done
+}
+
+probe_provider() {
+  command -v powerprofilesctl >/dev/null || return 1
+  find_dell_profile_dir >/dev/null
+}
+
+set_os_profile() {
+  local target=$1
+  local attempt
+
+  [[ $(powerprofilesctl get 2>/dev/null) == "$target" ]] && return 0
+
+  # Some systems expose more than one platform-profile controller. PPD can
+  # consequently settle one level per request, so allow bounded convergence.
+  for (( attempt = 0; attempt < 3; attempt++ )); do
+    powerprofilesctl set "$target" || return 1
+    [[ $(powerprofilesctl get 2>/dev/null) == "$target" ]] && return 0
+  done
+
+  echo "OS power profile did not settle: $target" >&2
+  return 1
+}
+
+save_preference() {
+  local power_source=$1
+  local profile=$2
+  local temporary
+
+  umask 077
+  mkdir -p "$state_dir" || return 1
+  temporary=$(mktemp "$state_dir/.${power_source}.XXXXXX") || return 1
+
+  if ! printf '%s\n' "$profile" >"$temporary" || ! mv -f "$temporary" "$state_dir/$power_source"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+set_profile() {
+  local action=${1:-autodetect}
+  local requested_profile=${2:-}
+  local profiles_output
+  local profile=""
+  local os_profile
+  local dell_profile_dir
+  local previous_os_profile
+  local -a profiles
+
+  (( $# <= 2 )) || {
+    echo "Usage: omarchy-dell-power-profiles set [autodetect|ac|battery] [quiet|cool|balanced|performance]" >&2
+    return 1
+  }
+
+  case "$action" in
+    autodetect)
+      if [[ $(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower OnBattery 2>/dev/null) == "b true" ]]; then
+        action=battery
+      else
+        action=ac
+      fi
+      ;;
+    ac | battery) ;;
+    *)
+      echo "Usage: omarchy-dell-power-profiles set [autodetect|ac|battery] [quiet|cool|balanced|performance]" >&2
+      return 1
+      ;;
+  esac
+
+  profiles_output=$(list_profiles) || return 1
+  [[ -n $profiles_output ]] || return 1
+  mapfile -t profiles <<<"$profiles_output"
+
+  profile_available() {
+    [[ " ${profiles[*]} " == *" $1 "* ]]
+  }
+
+  if [[ -n $requested_profile ]]; then
+    profile_available "$requested_profile" || {
+      echo "Power profile is not available: $requested_profile" >&2
+      return 1
+    }
+    profile=$requested_profile
+  elif [[ -r $state_dir/$action ]]; then
+    profile=$(<"$state_dir/$action")
+    if [[ $profile == "power-saver" ]]; then
+      if profile_available quiet; then
+        profile=quiet
+      elif profile_available cool; then
+        profile=cool
+      fi
+    fi
+  fi
+
+  if [[ -z $profile ]] || ! profile_available "$profile"; then
+    if [[ $action == "ac" ]] && profile_available performance; then
+      profile=performance
+    elif profile_available balanced; then
+      profile=balanced
+    else
+      profile=${profiles[0]}
+    fi
+  fi
+
+  dell_profile_dir=$(find_dell_profile_dir) || return 1
+  os_profile=$(os_profile_for "$profile") || return 1
+  previous_os_profile=$(powerprofilesctl get 2>/dev/null)
+  [[ -n $previous_os_profile ]] || {
+    echo "Unable to read the current OS power profile" >&2
+    return 1
+  }
+
+  if ! set_os_profile "$os_profile"; then
+    set_os_profile "$previous_os_profile" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  if [[ $(<"$dell_profile_dir/profile") != "$profile" ]]; then
+    if ! printf '%s\n' "$profile" >"$dell_profile_dir/profile" ||
+      [[ $(<"$dell_profile_dir/profile") != "$profile" ]]; then
+      set_os_profile "$previous_os_profile" >/dev/null 2>&1 || true
+      return 1
+    fi
+  fi
+
+  if [[ -n $requested_profile ]] && ! save_preference "$action" "$requested_profile"; then
+    echo "Unable to remember the $action power profile" >&2
+    return 1
+  fi
+}
+
+case "${1:-}" in
+  probe)
+    (( $# == 1 )) || usage
+    probe_provider
+    ;;
+  list)
+    shift
+    (( $# <= 1 )) || usage
+    list_profiles "${1:-}"
+    ;;
+  set)
+    shift
+    set_profile "$@"
+    ;;
+  --help | -h)
+    usage 0
+    ;;
+  *)
+    usage
+    ;;
+esac
