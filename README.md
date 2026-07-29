@@ -5,8 +5,10 @@ cleanly separated pieces:
 
 - an Arch package that owns hardware detection, profile coordination, state,
   and udev permissions
-- an optional Quattro bar widget that presents the profiles without embedding
-  Dell-specific code in Omarchy
+- an optional Quattro power-panel replacement that preserves Omarchy's full
+  battery UI while adding the Dell profiles
+
+![Dell Power Profiles Quattro widget](preview.png)
 
 It exposes `quiet`, `cool`, `balanced`, and `performance` while coordinating
 the Dell firmware controller with the OS power profile.
@@ -49,16 +51,19 @@ permissions it changed.
 
 ## Install the bar widget
 
-The marketplace installs the optional frontend with:
+Install the optional frontend, then replace the stock power widget so the bar
+has one complete power panel instead of two partial ones:
 
 ```bash
 omarchy plugin add https://github.com/stappmus/omarchy-dell-power-profiles.git --enable
-omarchy bar plugin add stappmus.dell-power-profiles --section right
+omarchy bar plugin remove omarchy.power
 ```
 
-The widget remains usable if installed before the backend: its panel explains
-whether the package is missing or no writable Dell controller is available.
-Once the backend is installed, reopening the panel discovers it automatically.
+The replacement keeps the stock battery icon, charge state, percentage,
+progress, capacity, cycle count, time estimate, and charge/discharge rate. If
+it is installed before the backend, the panel keeps the standard OS power
+profiles available and explains what is missing. Once the backend is
+installed, it discovers the Dell modes automatically.
 
 The widget restores the saved AC or battery preference when it loads and when
 the power source changes. Compatible Omarchy versions can also discover the
@@ -84,12 +89,19 @@ Remove the frontend and backend independently:
 
 ```bash
 omarchy plugin remove stappmus.dell-power-profiles
+omarchy bar plugin add omarchy.power --section right
 sudo pacman -Rns omarchy-dell-power-profiles
 ```
 
 The package does not overwrite files in a user's home directory. Its udev rule
 grants the local `wheel` group write access only to the Dell
 `platform-profile` attribute.
+
+## Upstream
+
+The panel frontend is derived from Omarchy's MIT-licensed `omarchy.power`
+widget. It deliberately remains a separate plugin so Dell-specific behavior
+does not need to live in Omarchy core.
 
 ## Test
 

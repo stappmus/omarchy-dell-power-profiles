@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "stappmus.dell-power-profiles",
-  "name": "Dell Power Profiles",
-  "version": "1.0.0",
+  "name": "Dell Power Panel",
+  "version": "1.1.0",
   "author": "Kristoffer Haugland",
   "license": "MIT",
-  "description": "Control Dell quiet, cool, balanced, and performance firmware modes from the Omarchy bar.",
+  "description": "A complete Omarchy battery panel with coordinated Dell firmware and OS power profiles.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,8 +13,8 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Dell Power Profiles",
-    "description": "Coordinate Dell firmware modes with power-profiles-daemon.",
+    "displayName": "Dell Power Panel",
+    "description": "Replace the stock power widget with Dell-aware firmware profiles.",
     "category": "Hardware",
     "allowMultiple": false
   }
