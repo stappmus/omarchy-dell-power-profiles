@@ -1,8 +1,15 @@
-# omarchy-dell-power-profiles
+# Dell Power Profiles for Omarchy
 
-An optional Dell power-profile provider for Omarchy. It exposes the firmware
-profiles `quiet`, `cool`, `balanced`, and `performance` through Omarchy's power
-menu while keeping Dell-specific sysfs behavior outside Omarchy itself.
+A Dell firmware power-profile integration for Omarchy, distributed as two
+cleanly separated pieces:
+
+- an Arch package that owns hardware detection, profile coordination, state,
+  and udev permissions
+- an optional Quattro bar widget that presents the profiles without embedding
+  Dell-specific code in Omarchy
+
+It exposes `quiet`, `cool`, `balanced`, and `performance` while coordinating
+the Dell firmware controller with the OS power profile.
 
 The provider coordinates each firmware mode with
 [`power-profiles-daemon`](https://gitlab.freedesktop.org/upower/power-profiles-daemon):
@@ -18,11 +25,13 @@ Only modes supported by both the Dell firmware and
 `power-profiles-daemon` are shown. A mode is marked active only when both
 layers agree.
 
-## Install
+## Install the backend
 
-Build and install the Arch package:
+Clone the repository and build the Arch package:
 
 ```bash
+git clone https://github.com/stappmus/omarchy-dell-power-profiles.git
+cd omarchy-dell-power-profiles
 makepkg --cleanbuild --install
 ```
 
@@ -34,9 +43,26 @@ The package installs:
 - `/usr/lib/udev/rules.d/99-omarchy-dell-platform-profile.rules`, which grants
   the `wheel` group write access to the Dell firmware profile
 
-The install hook reloads and reapplies the udev rule immediately. The
-permissions are also recreated normally at boot, so no files under a user's
-home directory are modified.
+The package hook reloads and reapplies the udev rule immediately. Permissions
+are recreated normally at boot, and package removal restores the sysfs
+permissions it changed.
+
+## Install the bar widget
+
+The marketplace installs the optional frontend with:
+
+```bash
+omarchy plugin add https://github.com/stappmus/omarchy-dell-power-profiles.git --enable
+omarchy bar plugin add stappmus.dell-power-profiles --section right
+```
+
+The widget remains usable if installed before the backend: its panel explains
+whether the package is missing or no writable Dell controller is available.
+Once the backend is installed, reopening the panel discovers it automatically.
+
+The widget restores the saved AC or battery preference when it loads and when
+the power source changes. Compatible Omarchy versions can also discover the
+same packaged provider from the built-in power menu.
 
 ## CLI
 
@@ -52,12 +78,28 @@ omarchy-dell-power-profiles set battery cool
 Selections are remembered independently for AC and battery operation under
 `$XDG_STATE_HOME/omarchy/powerprofiles`.
 
+## Remove
+
+Remove the frontend and backend independently:
+
+```bash
+omarchy plugin remove stappmus.dell-power-profiles
+sudo pacman -Rns omarchy-dell-power-profiles
+```
+
+The package does not overwrite files in a user's home directory. Its udev rule
+grants the local `wheel` group write access only to the Dell
+`platform-profile` attribute.
+
 ## Test
 
 ```bash
 ./provider-test.sh
+./plugin-test.sh
+qmllint -I /usr/share/omarchy/shell Panel.qml
+omarchy plugin validate .
 makepkg --cleanbuild
 ```
 
-The test suite uses temporary fake sysfs and `powerprofilesctl` implementations;
-it does not change the host's power profile.
+The backend suite uses temporary fake sysfs and `powerprofilesctl`
+implementations; it does not change the host's power profile.
