@@ -1,6 +1,6 @@
 pkgbase = omarchy-dell-power-profiles
 	pkgdesc = Dell firmware power-profile backend for Omarchy
-	pkgver = 1.1.0
+	pkgver = 1.1.1
 	pkgrel = 1
 	url = https://github.com/stappmus/omarchy-dell-power-profiles
 	install = omarchy-dell-power-profiles.install
@@ -20,7 +20,7 @@ pkgbase = omarchy-dell-power-profiles
 	sha256sums = f3e910a2da1c0dd0318575cf37f1418eabd3deb8a5da5b83618f19ecaf912ad1
 	sha256sums = d1e779da734452ea17ca221abeac5c4425c5fda79e05f384af4ca0da401eae49
 	sha256sums = 35129170ec70c398edcd04f70164aa9247cb19d065ec2a79010e0d1d853efa32
-	sha256sums = 18c30f877d630c431f79c5cc5b36f1d7c35e749b4a0e7b9d07dda5dac8eb561e
+	sha256sums = d0a1720a2cdf6251d7747f0570d899d7ae3e89ba7fe2f98a98391605fa0482b8
 	sha256sums = 3a91944679bc66990c9d99d93a5521e61bdc46f33d31050a78fb3c00ca41ce35
 
 pkgname = omarchy-dell-power-profiles

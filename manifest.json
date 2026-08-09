@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "stappmus.dell-power-profiles",
   "name": "Dell Power Panel",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Kristoffer Haugland",
   "license": "MIT",
   "description": "A complete Omarchy battery panel with coordinated Dell firmware and OS power profiles.",
@@ -16,6 +16,10 @@
     "displayName": "Dell Power Panel",
     "description": "Replace the stock power widget with Dell-aware firmware profiles.",
     "category": "Hardware",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showPercentage": false
+    }
   }
 }

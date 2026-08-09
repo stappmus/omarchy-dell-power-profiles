@@ -12,6 +12,9 @@ Panel {
   id: root
   moduleName: "stappmus.dell-power-profiles"
   ipcTarget: "stappmus.dell-power-profiles"
+  // Own the IPC target so the percentage toggle can be exposed alongside the
+  // standard panel controls.
+  manageIpc: false
 
   property var batteryInfo: ({})
   property var profiles: []
@@ -23,6 +26,10 @@ Panel {
   property var pendingCommand: []
 
   readonly property bool backendReady: backendState === "ready"
+  readonly property bool showPercentage: setting("showPercentage", false) === true
+  readonly property real openPanelIndicatorWidth: showPercentage && !button.vertical
+    ? button.glyphPaintedWidth
+    : 0
   readonly property int profileColumns: profiles.length > 3 ? 2 : Math.max(1, profiles.length)
   readonly property bool batteryPresent: {
     var device = UPower.displayDevice
@@ -190,6 +197,23 @@ Panel {
     }
   }
 
+  function togglePercentage() {
+    root.settings = Object.assign({}, root.settings, { showPercentage: !root.showPercentage })
+    if (root.bar && root.bar.shell)
+      root.bar.shell.updateEntryInline(root.moduleName, root.settings)
+  }
+
+  IpcHandler {
+    target: "stappmus.dell-power-profiles"
+
+    function open() { root.open() }
+    function close() { root.close() }
+    function show() { root.open() }
+    function hide() { root.close() }
+    function toggle() { root.toggle() }
+    function togglePercentage() { root.togglePercentage() }
+  }
+
   onOpenedChanged: {
     if (!opened) return
     if (!batteryPresent) {
@@ -302,10 +326,15 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.batteryIcon()
+    text: root.showPercentage && !vertical
+      ? Math.round(root.batteryFraction * 100) + "% " + root.batteryIcon()
+      : root.batteryIcon()
+    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)
     tooltipText: ""
     onPressed: function(b) {
-      if (root.batteryPresent) root.toggle()
+      if (!root.batteryPresent) return
+      if (b === Qt.RightButton) root.togglePercentage()
+      else root.toggle()
     }
   }
 

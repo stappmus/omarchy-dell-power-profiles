@@ -56,7 +56,7 @@ has one complete power panel instead of two partial ones:
 
 ```bash
 omarchy plugin add https://github.com/stappmus/omarchy-dell-power-profiles.git --enable
-omarchy bar plugin remove omarchy.power
+omarchy plugin disable omarchy.power
 ```
 
 The replacement keeps the stock battery icon, charge state, percentage,
@@ -64,6 +64,9 @@ progress, capacity, cycle count, time estimate, and charge/discharge rate. If
 it is installed before the backend, the panel keeps the standard OS power
 profiles available and explains what is missing. Once the backend is
 installed, it discovers the Dell modes automatically.
+
+Right-click the bar widget to toggle its compact battery percentage, matching
+the current built-in Omarchy power widget.
 
 The widget restores the saved AC or battery preference when it loads and when
 the power source changes. Compatible Omarchy versions can also discover the
@@ -89,7 +92,7 @@ Remove the frontend and backend independently:
 
 ```bash
 omarchy plugin remove stappmus.dell-power-profiles
-omarchy bar plugin add omarchy.power --section right
+omarchy plugin enable omarchy.power --section right
 sudo pacman -Rns omarchy-dell-power-profiles
 ```
 

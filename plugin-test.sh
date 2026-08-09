@@ -9,11 +9,15 @@ jq -e '
   and .id == "stappmus.dell-power-profiles"
   and (.kinds | index("bar-widget"))
   and .entryPoints.barWidget == "Panel.qml"
+  and .barWidget.defaultSection == "right"
+  and .barWidget.defaults.showPercentage == false
 ' "$root/manifest.json" >/dev/null
 
 grep -F 'command: ["omarchy-battery-status", "--shell"]' "$root/Panel.qml" >/dev/null
 grep -F '"/usr/bin/omarchy-dell-power-profiles", "set"' "$root/Panel.qml" >/dev/null
 grep -F 'omarchy-powerprofiles-list --active-state' "$root/Panel.qml" >/dev/null
+grep -F 'function togglePercentage()' "$root/Panel.qml" >/dev/null
+grep -F 'if (b === Qt.RightButton) root.togglePercentage()' "$root/Panel.qml" >/dev/null
 if grep -F 'omarchy-system-stats' "$root/Panel.qml" >/dev/null; then
   echo "not ok - plugin should not poll unused system statistics" >&2
   exit 1
