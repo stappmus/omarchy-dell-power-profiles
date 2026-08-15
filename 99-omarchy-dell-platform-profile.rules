@@ -1,2 +1,11 @@
 ACTION=="add", SUBSYSTEM=="platform-profile", ATTR{name}=="dell-pc", RUN+="/usr/bin/chgrp wheel /sys/class/platform-profile/%k/profile"
 ACTION=="add", SUBSYSTEM=="platform-profile", ATTR{name}=="dell-pc", RUN+="/usr/bin/chmod g+w /sys/class/platform-profile/%k/profile"
+
+# Permit local administrators to select the Dell battery charging profile and
+# its custom thresholds without granting access to unrelated BIOS settings.
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chgrp wheel /sys/class/firmware-attributes/%k/attributes/PrimaryBattChargeCfg/current_value"
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chmod g+rw /sys/class/firmware-attributes/%k/attributes/PrimaryBattChargeCfg/current_value"
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chgrp wheel /sys/class/firmware-attributes/%k/attributes/CustomChargeStart/current_value"
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chmod g+rw /sys/class/firmware-attributes/%k/attributes/CustomChargeStart/current_value"
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chgrp wheel /sys/class/firmware-attributes/%k/attributes/CustomChargeStop/current_value"
+ACTION=="add", SUBSYSTEM=="firmware-attributes", KERNEL=="dell-wmi-sysman", ATTR{attributes/PrimaryBattChargeCfg/possible_values}=="?*", RUN+="/usr/bin/chmod g+rw /sys/class/firmware-attributes/%k/attributes/CustomChargeStop/current_value"

@@ -1,6 +1,6 @@
 # Dell Power Profiles for Omarchy
 
-A Dell firmware power-profile integration for Omarchy, distributed as two
+A Dell firmware power and charging-profile integration for Omarchy, distributed as two
 cleanly separated pieces:
 
 - an Arch package that owns hardware detection, profile coordination, state,
@@ -11,7 +11,9 @@ cleanly separated pieces:
 ![Dell Power Profiles Quattro widget](preview.png)
 
 It exposes `quiet`, `cool`, `balanced`, and `performance` while coordinating
-the Dell firmware controller with the OS power profile.
+the Dell firmware controller with the OS power profile. It also reads and
+changes Dell's `Adaptive`, `Standard`, `ExpressCharge`, `Primarily AC`, and
+`Custom` battery-charging modes.
 
 The provider coordinates each firmware mode with
 [`power-profiles-daemon`](https://gitlab.freedesktop.org/upower/power-profiles-daemon):
@@ -43,7 +45,8 @@ The package installs:
   compatible Omarchy versions
 - `/usr/bin/omarchy-dell-power-profiles`, a direct CLI symlink
 - `/usr/lib/udev/rules.d/99-omarchy-dell-platform-profile.rules`, which grants
-  the `wheel` group write access to the Dell firmware profile
+  the `wheel` group access only to the Dell power-profile and battery-charging
+  attributes used by the backend
 
 The package hook reloads and reapplies the udev rule immediately. Permissions
 are recreated normally at boot, and package removal restores the sysfs
@@ -65,6 +68,14 @@ it is installed before the backend, the panel keeps the standard OS power
 profiles available and explains what is missing. Once the backend is
 installed, it discovers the Dell modes automatically.
 
+The selected charging profile appears in one compact row. Its available modes
+stay hidden until the row is opened as a dropdown. A saved custom threshold is
+shown in its label, for example `Custom · 50–80%`. Selecting `Custom` reveals
+separate start- and stop-percentage fields. Values outside Dell's firmware
+limits are adjusted automatically (`25%` becomes `50%` on supported systems),
+and the panel shows the active BIOS ranges and preserves at least a
+five-percentage-point gap.
+
 Right-click the bar widget to toggle its compact battery percentage, matching
 the current built-in Omarchy power widget.
 
@@ -81,6 +92,11 @@ omarchy-dell-power-profiles list --active-state
 omarchy-dell-power-profiles set autodetect quiet
 omarchy-dell-power-profiles set ac performance
 omarchy-dell-power-profiles set battery cool
+omarchy-dell-power-profiles charging probe
+omarchy-dell-power-profiles charging list --active-state
+omarchy-dell-power-profiles charging set adaptive
+omarchy-dell-power-profiles charging set primarily-ac
+omarchy-dell-power-profiles charging set custom 50 80
 ```
 
 Selections are remembered independently for AC and battery operation under
@@ -97,8 +113,9 @@ sudo pacman -Rns omarchy-dell-power-profiles
 ```
 
 The package does not overwrite files in a user's home directory. Its udev rule
-grants the local `wheel` group write access only to the Dell
-`platform-profile` attribute.
+grants the local `wheel` group write access only to the Dell platform power
+profile, primary battery-charging mode, and its custom start and stop
+thresholds.
 
 ## Upstream
 

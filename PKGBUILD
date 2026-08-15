@@ -1,9 +1,9 @@
 # Maintainer: Kristoffer Haugland <stappmus at gmail dot com>
 
 pkgname=omarchy-dell-power-profiles
-pkgver=1.1.1
+pkgver=1.2.0
 pkgrel=1
-pkgdesc="Dell firmware power-profile backend for Omarchy"
+pkgdesc="Dell firmware power and charging-profile backend for Omarchy"
 arch=('any')
 url="https://github.com/stappmus/omarchy-dell-power-profiles"
 license=('MIT')
@@ -19,11 +19,11 @@ source=(
   'LICENSE'
 )
 sha256sums=(
-  '691be6a79e823074573baa52fbef71174986c52e38482c1cc1160ab1e9ca414e'
-  'f3e910a2da1c0dd0318575cf37f1418eabd3deb8a5da5b83618f19ecaf912ad1'
-  'd1e779da734452ea17ca221abeac5c4425c5fda79e05f384af4ca0da401eae49'
-  '35129170ec70c398edcd04f70164aa9247cb19d065ec2a79010e0d1d853efa32'
-  'd0a1720a2cdf6251d7747f0570d899d7ae3e89ba7fe2f98a98391605fa0482b8'
+  'ebc806f8538e5f367680c85421580cbede04a334aaa1d3192beba4c7e7b0f76b'
+  '8c547c20d9a9c9f57a9bf4450b8526660af0d04fdcbbaf136ee0ef6494f1de01'
+  'b347478cd46842a21a2b93c2736283959b6de6006c8bc3d31b6d6ccb86fc4a99'
+  '7e94eb5cc9e3a7bf824b9bf1a8bdb8be92ac9cd6553c8e082754a03b31074c66'
+  'e549d7624b36b76f09f30dc440a1184d5470457921d523cde48f79d788782e69'
   '3a91944679bc66990c9d99d93a5521e61bdc46f33d31050a78fb3c00ca41ce35'
 )
 

@@ -20,12 +20,52 @@ Panel {
   property var profiles: []
   property string activeProfile: ""
   property string backendState: "checking"
+  property var chargingProfiles: []
+  property string activeChargingProfile: ""
+  property string chargingBackendState: "checking"
+  property string chargingCustomStart: ""
+  property string chargingCustomStop: ""
+  property string chargingCustomStartMin: ""
+  property string chargingCustomStartMax: ""
+  property string chargingCustomStartIncrement: ""
+  property string chargingCustomStopMin: ""
+  property string chargingCustomStopMax: ""
+  property string chargingCustomStopIncrement: ""
+  property bool chargingProfileBusy: false
+  property string chargingProfileError: ""
+  property string chargingAdjustmentNotice: ""
+  property var pendingChargingArguments: []
   property int profileIndex: 0
   property bool cursorActive: false
   property bool restoredPowerSource: false
   property var pendingCommand: []
 
   readonly property bool backendReady: backendState === "ready"
+  readonly property bool chargingBackendReady: chargingBackendState === "ready"
+  readonly property var chargingProfileOptions: Model.chargingProfileOptions(
+    chargingProfiles,
+    chargingCustomStart,
+    chargingCustomStop
+  )
+  readonly property string chargingProfileValue: activeChargingProfile ||
+    (chargingBackendState === "checking" ? "Checking…" : "Unavailable")
+  readonly property bool customChargingSelected: chargingProfileDropdown.value === "custom"
+  readonly property bool customChargingControlsAvailable: Model.customChargingLimitsValid(
+    chargingCustomStartMin,
+    chargingCustomStartMax,
+    chargingCustomStartIncrement,
+    chargingCustomStopMin,
+    chargingCustomStopMax,
+    chargingCustomStopIncrement
+  )
+  readonly property string customChargingLimitsNotice: customChargingControlsAvailable
+    ? Model.customChargingLimitsLabel(
+        chargingCustomStartMin,
+        chargingCustomStartMax,
+        chargingCustomStopMin,
+        chargingCustomStopMax
+      )
+    : ""
   readonly property bool showPercentage: setting("showPercentage", false) === true
   readonly property real openPanelIndicatorWidth: showPercentage && !button.vertical
     ? button.glyphPaintedWidth
@@ -43,6 +83,31 @@ Panel {
       return "The Dell controller is unavailable. Standard OS profiles remain available."
     if (backendState === "checking") return "Checking the Dell power-profile backend."
     if (profiles.length === 0) return "No compatible power profiles are available."
+    return ""
+  }
+  readonly property string chargingProfileStatusDetail: {
+    if (chargingProfileError !== "") return chargingProfileError
+    if (chargingProfileBusy && chargeActionProc.requestedStart !== "")
+      return "Applying " + Model.chargingProfileLabel(
+        "custom",
+        chargeActionProc.requestedStart,
+        chargeActionProc.requestedStop
+      ) + "…"
+    if (chargingProfileBusy)
+      return "Applying " + Model.chargingProfileLabel(
+        chargeActionProc.requestedProfile,
+        chargingCustomStart,
+        chargingCustomStop
+      ) + "…"
+    if (chargingBackendState === "missing")
+      return "Install or update the backend package to change Dell charging profiles."
+    if (chargingBackendState === "unavailable")
+      return "Dell charging controls are unavailable. Reinstall the backend or check the firmware interface."
+    if (chargingBackendState === "checking") return "Checking Dell charging controls."
+    if (chargingProfiles.length === 0) return "No compatible charging profiles are available."
+    if (activeChargingProfile === "") return "The current charging profile could not be identified."
+    if (customChargingSelected && !customChargingControlsAvailable)
+      return "Dell did not expose editable custom charging percentages."
     return ""
   }
 
@@ -137,7 +202,12 @@ Panel {
 
   function refresh() {
     if (!profilesProc.running) profilesProc.running = true
+    refreshChargingProfiles()
     if (batteryPresent && !batteryProc.running) batteryProc.running = true
+  }
+
+  function refreshChargingProfiles() {
+    if (!chargingProfilesProc.running) chargingProfilesProc.running = true
   }
 
   function updateBattery(raw) {
@@ -176,6 +246,23 @@ Panel {
     }
   }
 
+  function updateChargingProfiles(raw) {
+    var parsed = Model.parseChargingProfiles(raw)
+    chargingProfiles = parsed.profiles
+    activeChargingProfile = parsed.activeProfile
+    chargingBackendState = parsed.backendState
+    chargingCustomStart = parsed.customStart
+    chargingCustomStop = parsed.customStop
+    chargingCustomStartMin = parsed.customStartMin
+    chargingCustomStartMax = parsed.customStartMax
+    chargingCustomStartIncrement = parsed.customStartIncrement
+    chargingCustomStopMin = parsed.customStopMin
+    chargingCustomStopMax = parsed.customStopMax
+    chargingCustomStopIncrement = parsed.customStopIncrement
+    chargingProfileDropdown.value = chargingProfileValue
+    syncCustomChargingFields(false)
+  }
+
   function queueAction(command) {
     pendingCommand = command
     if (!actionProc.running) runPendingAction()
@@ -197,6 +284,88 @@ Panel {
     }
   }
 
+  function setChargingProfile(profile) {
+    if (!chargingBackendReady || !profile || profile === activeChargingProfile) return
+    chargingAdjustmentNotice = ""
+    queueChargingAction([profile])
+  }
+
+  function setCustomChargingThreshold(start, stop) {
+    if (!chargingBackendReady || !start || !stop) return
+    if (start === chargingCustomStart && stop === chargingCustomStop) return
+    queueChargingAction(["custom", String(start), String(stop)])
+  }
+
+  function syncCustomChargingFields(force) {
+    if (force || !customStartField.activeFocus)
+      customStartField.text = chargingCustomStart
+    if (force || !customStopField.activeFocus)
+      customStopField.text = chargingCustomStop
+  }
+
+  function applyCustomChargingField(editedField) {
+    if (!chargingBackendReady || chargingProfileBusy || !customChargingControlsAvailable) {
+      syncCustomChargingFields(true)
+      return
+    }
+
+    var normalized = Model.normalizeCustomChargingThresholds(
+      customStartField.text,
+      customStopField.text,
+      chargingCustomStart,
+      chargingCustomStop,
+      chargingCustomStartMin,
+      chargingCustomStartMax,
+      chargingCustomStartIncrement,
+      chargingCustomStopMin,
+      chargingCustomStopMax,
+      chargingCustomStopIncrement,
+      editedField
+    )
+
+    customStartField.text = normalized.start
+    customStopField.text = normalized.stop
+    chargingProfileError = ""
+    chargingAdjustmentNotice = normalized.adjusted
+      ? "Adjusted to " + normalized.start + "–" + normalized.stop + "% to fit the BIOS limits."
+      : ""
+
+    if (!normalized.valid) {
+      chargingProfileError = "Dell custom charging limits are unavailable."
+      return
+    }
+    setCustomChargingThreshold(normalized.start, normalized.stop)
+  }
+
+  function queueChargingAction(argumentsList) {
+    pendingChargingArguments = argumentsList
+    chargingProfileError = ""
+    if (!chargeActionProc.running) runPendingChargingProfile()
+  }
+
+  function runPendingChargingProfile() {
+    if (pendingChargingArguments.length === 0) return
+    var argumentsList = pendingChargingArguments
+    var command
+    pendingChargingArguments = []
+    chargeActionProc.requestedProfile = String(argumentsList[0] || "")
+    chargeActionProc.requestedStart = String(argumentsList[1] || "")
+    chargeActionProc.requestedStop = String(argumentsList[2] || "")
+    command = [
+      "/usr/bin/omarchy-dell-power-profiles",
+      "charging",
+      "set",
+      chargeActionProc.requestedProfile
+    ]
+    if (chargeActionProc.requestedStart !== "") {
+      command.push(chargeActionProc.requestedStart)
+      command.push(chargeActionProc.requestedStop)
+    }
+    chargeActionProc.command = command
+    chargingProfileBusy = true
+    chargeActionProc.running = true
+  }
+
   function togglePercentage() {
     root.settings = Object.assign({}, root.settings, { showPercentage: !root.showPercentage })
     if (root.bar && root.bar.shell)
@@ -215,12 +384,18 @@ Panel {
   }
 
   onOpenedChanged: {
-    if (!opened) return
+    if (!opened) {
+      chargingProfileDropdown.close()
+      customStartField.focus = false
+      customStopField.focus = false
+      return
+    }
     if (!batteryPresent) {
       close()
       return
     }
 
+    chargingAdjustmentNotice = ""
     refresh()
     var index = profiles.indexOf(activeProfile)
     profileIndex = index >= 0 ? index : 0
@@ -265,10 +440,61 @@ Panel {
   }
 
   Process {
+    id: chargingProfilesProc
+    command: [
+      "/usr/bin/bash",
+      "-c",
+      "if [[ ! -x /usr/bin/omarchy-dell-power-profiles ]] || ! /usr/bin/omarchy-dell-power-profiles --help 2>&1 | grep -q 'charging list'; then printf '__charging_backend_missing__\\n'; elif ! /usr/bin/omarchy-dell-power-profiles charging probe >/dev/null 2>&1; then printf '__charging_provider_unavailable__\\n'; else /usr/bin/omarchy-dell-power-profiles charging list --active-state 2>/dev/null; fi"
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.updateChargingProfiles(text)
+    }
+  }
+
+  Process {
     id: actionProc
     onExited: {
       root.refresh()
       root.runPendingAction()
+    }
+  }
+
+  Process {
+    id: chargeActionProc
+    property string requestedProfile: ""
+    property string requestedStart: ""
+    property string requestedStop: ""
+    property int lastExitCode: -1
+
+    onRunningChanged: if (running) lastExitCode = -1
+    stderr: StdioCollector {
+      id: chargeActionStderr
+      waitForEnd: true
+      onStreamFinished: {
+        var detail = String(text || "").trim()
+        if (detail !== "" && chargeActionProc.lastExitCode > 0)
+          root.chargingProfileError = detail
+      }
+    }
+    onExited: function(exitCode) {
+      lastExitCode = exitCode
+      root.chargingProfileBusy = false
+      if (exitCode === 0) {
+        root.activeChargingProfile = requestedProfile
+        if (requestedStart !== "") {
+          root.chargingCustomStart = requestedStart
+          root.chargingCustomStop = requestedStop
+        }
+        root.chargingProfileError = ""
+      } else {
+        var detail = String(chargeActionStderr.text || "").trim()
+        root.chargingProfileError = detail || "Unable to change the Dell charging profile."
+      }
+      chargingProfileDropdown.value = root.activeChargingProfile
+      root.syncCustomChargingFields(true)
+      root.refreshChargingProfiles()
+      root.runPendingChargingProfile()
     }
   }
 
@@ -351,6 +577,9 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: chargingProfileDropdown.popupOpen
+        || customStartField.activeFocus
+        || customStopField.activeFocus
       onMoveRequested: function(dx, dy) {
         if (!root.cursorActive) {
           root.cursorActive = true
@@ -591,6 +820,172 @@ Panel {
             text: root.profileStatusDetail
             color: root.bar.foreground
             opacity: 0.6
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
+
+        PanelSeparator {
+          foreground: root.bar.foreground
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+
+          PanelSectionHeader {
+            text: "CHARGING PROFILE"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+
+          Dropdown {
+            id: chargingProfileDropdown
+            width: parent.width
+            showLabel: false
+            value: root.chargingProfileValue
+            options: root.chargingProfileOptions
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            enabled: root.chargingBackendReady
+              && root.chargingProfiles.length > 0
+              && !root.chargingProfileBusy
+            opacity: enabled ? 1.0 : 0.6
+            onChanged: function(next) { root.setChargingProfile(next) }
+          }
+
+          Row {
+            visible: root.customChargingSelected && root.customChargingControlsAvailable
+            width: parent.width
+            spacing: Style.space(12)
+
+            Column {
+              width: (parent.width - parent.spacing) / 2
+              spacing: Style.spacing.labelGap
+
+              Text {
+                text: "Start charging"
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                TextField {
+                  id: customStartField
+                  width: parent.width - startPercent.implicitWidth - parent.spacing
+                  text: root.chargingCustomStart
+                  placeholderText: root.chargingCustomStartMin
+                  foreground: root.bar.foreground
+                  font.family: root.bar.fontFamily
+                  horizontalAlignment: TextInput.AlignRight
+                  inputMethodHints: Qt.ImhDigitsOnly
+                  maximumLength: 4
+                  selectByMouse: true
+                  enabled: root.chargingBackendReady
+                    && root.activeChargingProfile === "custom"
+                    && !root.chargingProfileBusy
+                  opacity: enabled ? 1.0 : 0.6
+                  onEditingFinished: root.applyCustomChargingField("start")
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      text = root.chargingCustomStart
+                      focus = false
+                      event.accepted = true
+                    }
+                  }
+                }
+
+                Text {
+                  id: startPercent
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "%"
+                  color: root.bar.foreground
+                  opacity: 0.7
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+              }
+            }
+
+            Column {
+              width: (parent.width - parent.spacing) / 2
+              spacing: Style.spacing.labelGap
+
+              Text {
+                text: "Stop charging"
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                TextField {
+                  id: customStopField
+                  width: parent.width - stopPercent.implicitWidth - parent.spacing
+                  text: root.chargingCustomStop
+                  placeholderText: root.chargingCustomStopMin
+                  foreground: root.bar.foreground
+                  font.family: root.bar.fontFamily
+                  horizontalAlignment: TextInput.AlignRight
+                  inputMethodHints: Qt.ImhDigitsOnly
+                  maximumLength: 4
+                  selectByMouse: true
+                  enabled: root.chargingBackendReady
+                    && root.activeChargingProfile === "custom"
+                    && !root.chargingProfileBusy
+                  opacity: enabled ? 1.0 : 0.6
+                  onEditingFinished: root.applyCustomChargingField("stop")
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      text = root.chargingCustomStop
+                      focus = false
+                      event.accepted = true
+                    }
+                  }
+                }
+
+                Text {
+                  id: stopPercent
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "%"
+                  color: root.bar.foreground
+                  opacity: 0.7
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+              }
+            }
+          }
+
+          Text {
+            visible: root.customChargingSelected && root.customChargingControlsAvailable
+            width: parent.width
+            text: (root.chargingAdjustmentNotice !== ""
+              ? root.chargingAdjustmentNotice + "\n"
+              : "") + root.customChargingLimitsNotice
+            color: root.bar.foreground
+            opacity: 0.55
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            visible: root.chargingProfileStatusDetail !== ""
+            width: parent.width
+            text: root.chargingProfileStatusDetail
+            color: root.bar.foreground
+            opacity: root.chargingProfileError !== "" ? 0.85 : 0.6
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap

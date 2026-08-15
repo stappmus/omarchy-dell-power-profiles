@@ -17,7 +17,16 @@ pass() {
 }
 
 profile_root="$test_root/platform-profile"
-mkdir -p "$test_root/bin" "$test_root/state" "$profile_root/platform-profile-0" "$profile_root/platform-profile-1"
+firmware_attributes_root="$test_root/firmware-attributes"
+charge_attributes="$firmware_attributes_root/dell-wmi-sysman/attributes"
+mkdir -p \
+  "$test_root/bin" \
+  "$test_root/state" \
+  "$profile_root/platform-profile-0" \
+  "$profile_root/platform-profile-1" \
+  "$charge_attributes/PrimaryBattChargeCfg" \
+  "$charge_attributes/CustomChargeStart" \
+  "$charge_attributes/CustomChargeStop"
 
 printf '%s\n' "SoC Power Slider" >"$profile_root/platform-profile-0/name"
 printf '%s\n' "low-power balanced performance" >"$profile_root/platform-profile-0/choices"
@@ -25,6 +34,17 @@ printf '%s\n' "balanced" >"$profile_root/platform-profile-0/profile"
 printf '%s\n' "dell-pc" >"$profile_root/platform-profile-1/name"
 printf '%s\n' "cool quiet balanced performance" >"$profile_root/platform-profile-1/choices"
 printf '%s\n' "quiet" >"$profile_root/platform-profile-1/profile"
+
+printf '%s\n' "Adaptive;Standard;Express;PrimAcUse;Custom;" >"$charge_attributes/PrimaryBattChargeCfg/possible_values"
+printf '%s\n' "Adaptive" >"$charge_attributes/PrimaryBattChargeCfg/current_value"
+printf '%s\n' "50" >"$charge_attributes/CustomChargeStart/current_value"
+printf '%s\n' "50" >"$charge_attributes/CustomChargeStart/min_value"
+printf '%s\n' "95" >"$charge_attributes/CustomChargeStart/max_value"
+printf '%s\n' "1" >"$charge_attributes/CustomChargeStart/scalar_increment"
+printf '%s\n' "90" >"$charge_attributes/CustomChargeStop/current_value"
+printf '%s\n' "55" >"$charge_attributes/CustomChargeStop/min_value"
+printf '%s\n' "100" >"$charge_attributes/CustomChargeStop/max_value"
+printf '%s\n' "1" >"$charge_attributes/CustomChargeStop/scalar_increment"
 
 cat >"$test_root/bin/powerprofilesctl" <<'EOF'
 #!/bin/bash
@@ -77,6 +97,7 @@ export POWERPROFILES_OS_STATE="$test_root/os-profile"
 export DELL_PROFILE_FILE="$profile_root/platform-profile-1/profile"
 export OMARCHY_POWERPROFILES_STATE_DIR="$test_root/state"
 export OMARCHY_PLATFORM_PROFILE_ROOT="$profile_root"
+export OMARCHY_FIRMWARE_ATTRIBUTES_ROOT="$firmware_attributes_root"
 printf 'power-saver\n' >"$POWERPROFILES_OS_STATE"
 
 "$provider" probe || fail "provider detects a usable Dell controller"
@@ -150,6 +171,74 @@ fi
 [[ $(<"$profile_root/platform-profile-1/profile") == "quiet" ]] || fail "failed firmware write preserves the Dell mode"
 [[ $(<"$test_root/state/ac") == "quiet" ]] || fail "failed firmware write preserves the preference"
 pass "failed firmware writes roll back the OS mode"
+
+"$provider" charging probe || fail "provider detects writable Dell charging controls"
+pass "provider detects writable Dell charging controls"
+
+output=$("$provider" charging list)
+[[ $output == $'adaptive\nstandard\nexpress\nprimarily-ac\ncustom' ]] ||
+  fail "charging profiles use the intended order"
+pass "charging profiles use the intended order"
+
+output=$("$provider" charging list --active-state)
+[[ $output == $'adaptive\t1\nstandard\t0\nexpress\t0\nprimarily-ac\t0\ncustom\t0\t50\t90\t50\t95\t1\t55\t100\t1' ]] ||
+  fail "charging profiles report active state and custom percentage metadata"
+pass "charging profiles report active state and custom percentage metadata"
+
+for mapping in \
+  "adaptive Adaptive" \
+  "standard Standard" \
+  "express Express" \
+  "primarily-ac PrimAcUse" \
+  "custom Custom"; do
+  read -r charging_profile firmware_value <<<"$mapping"
+  "$provider" charging set "$charging_profile"
+  [[ $(<"$charge_attributes/PrimaryBattChargeCfg/current_value") == "$firmware_value" ]] ||
+    fail "$charging_profile applies the matching Dell charging mode"
+done
+pass "all Dell charging profiles apply through the firmware attribute"
+
+"$provider" charging set adaptive
+"$provider" charging set custom 60 80
+[[ $(<"$charge_attributes/PrimaryBattChargeCfg/current_value") == "Custom" ]] ||
+  fail "custom percentages select the custom charging mode"
+[[ $(<"$charge_attributes/CustomChargeStart/current_value") == "60" ]] ||
+  fail "custom percentages update the charge start"
+[[ $(<"$charge_attributes/CustomChargeStop/current_value") == "80" ]] ||
+  fail "custom percentages update the charge stop"
+pass "custom charging percentages apply with their charging mode"
+
+for invalid_range in "49 80" "60 101" "80 84"; do
+  read -r start stop <<<"$invalid_range"
+  if "$provider" charging set custom "$start" "$stop" 2>/dev/null; then
+    fail "invalid custom charging range $start-$stop is rejected"
+  fi
+  [[ $(<"$charge_attributes/CustomChargeStart/current_value") == "60" ]] ||
+    fail "an invalid custom range preserves the charge start"
+  [[ $(<"$charge_attributes/CustomChargeStop/current_value") == "80" ]] ||
+    fail "an invalid custom range preserves the charge stop"
+done
+pass "custom charging bounds and the minimum gap are enforced before writes"
+
+chmod 400 "$charge_attributes/CustomChargeStart/current_value" "$charge_attributes/CustomChargeStop/current_value"
+if "$provider" charging set custom 65 85 2>/dev/null; then
+  fail "custom charging percentages require writable firmware attributes"
+fi
+pass "provider rejects custom thresholds that the user cannot change"
+chmod 600 "$charge_attributes/CustomChargeStart/current_value" "$charge_attributes/CustomChargeStop/current_value"
+
+printf '%s\n' "Adaptive;Standard;PrimAcUse;Custom;" >"$charge_attributes/PrimaryBattChargeCfg/possible_values"
+if "$provider" charging set express 2>/dev/null; then
+  fail "unsupported charging profiles cannot bypass firmware capabilities"
+fi
+pass "unsupported charging profiles cannot bypass firmware capabilities"
+
+chmod 400 "$charge_attributes/PrimaryBattChargeCfg/current_value"
+if "$provider" charging probe; then
+  fail "provider ignores charging controls that the user cannot change"
+fi
+pass "provider ignores charging controls that the user cannot change"
+chmod 600 "$charge_attributes/PrimaryBattChargeCfg/current_value"
 
 chmod 444 "$profile_root/platform-profile-1/profile"
 if "$provider" probe; then

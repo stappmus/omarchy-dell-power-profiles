@@ -3,12 +3,20 @@
 set -uo pipefail
 
 profile_root="${OMARCHY_PLATFORM_PROFILE_ROOT:-/sys/class/platform-profile}"
+firmware_attributes_root="${OMARCHY_FIRMWARE_ATTRIBUTES_ROOT:-/sys/class/firmware-attributes}"
 state_dir="${OMARCHY_POWERPROFILES_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles}"
 
 usage() {
   local status=${1:-1}
 
-  echo "Usage: omarchy-dell-power-profiles probe | list [--active-state] | set [autodetect|ac|battery] [quiet|cool|balanced|performance]" >&2
+  cat >&2 <<'EOF'
+Usage: omarchy-dell-power-profiles probe
+       omarchy-dell-power-profiles list [--active-state]
+       omarchy-dell-power-profiles set [autodetect|ac|battery] [quiet|cool|balanced|performance]
+       omarchy-dell-power-profiles charging probe
+       omarchy-dell-power-profiles charging list [--active-state]
+       omarchy-dell-power-profiles charging set adaptive|standard|express|primarily-ac|custom [START STOP]
+EOF
   exit "$status"
 }
 
@@ -91,6 +99,285 @@ list_profiles() {
 probe_provider() {
   command -v powerprofilesctl >/dev/null || return 1
   find_dell_profile_dir >/dev/null
+}
+
+find_dell_charge_attributes_dir() {
+  local attributes_dir="$firmware_attributes_root/dell-wmi-sysman/attributes"
+  local mode_dir="$attributes_dir/PrimaryBattChargeCfg"
+
+  [[ -r $mode_dir/current_value && -w $mode_dir/current_value && -r $mode_dir/possible_values ]] || return 1
+  printf '%s\n' "$attributes_dir"
+}
+
+read_integer_attribute() {
+  local path=$1
+  local description=$2
+  local value
+
+  [[ -r $path ]] || {
+    echo "$description is unavailable" >&2
+    return 1
+  }
+  value=$(<"$path")
+  [[ $value =~ ^[0-9]+$ ]] || {
+    echo "$description is not an integer: $value" >&2
+    return 1
+  }
+
+  printf '%d\n' "$(( 10#$value ))"
+}
+
+load_custom_charging_metadata() {
+  local attributes_dir=$1
+  local start_dir="$attributes_dir/CustomChargeStart"
+  local stop_dir="$attributes_dir/CustomChargeStop"
+
+  CUSTOM_CHARGE_START=$(read_integer_attribute "$start_dir/current_value" "Custom charge start") || return 1
+  CUSTOM_CHARGE_START_MIN=$(read_integer_attribute "$start_dir/min_value" "Custom charge start minimum") || return 1
+  CUSTOM_CHARGE_START_MAX=$(read_integer_attribute "$start_dir/max_value" "Custom charge start maximum") || return 1
+  CUSTOM_CHARGE_START_INCREMENT=$(read_integer_attribute "$start_dir/scalar_increment" "Custom charge start increment") || return 1
+  CUSTOM_CHARGE_STOP=$(read_integer_attribute "$stop_dir/current_value" "Custom charge stop") || return 1
+  CUSTOM_CHARGE_STOP_MIN=$(read_integer_attribute "$stop_dir/min_value" "Custom charge stop minimum") || return 1
+  CUSTOM_CHARGE_STOP_MAX=$(read_integer_attribute "$stop_dir/max_value" "Custom charge stop maximum") || return 1
+  CUSTOM_CHARGE_STOP_INCREMENT=$(read_integer_attribute "$stop_dir/scalar_increment" "Custom charge stop increment") || return 1
+
+  (( CUSTOM_CHARGE_START_INCREMENT > 0 && CUSTOM_CHARGE_STOP_INCREMENT > 0 )) || {
+    echo "Custom charging increments must be greater than zero" >&2
+    return 1
+  }
+}
+
+write_and_verify_attribute() {
+  local path=$1
+  local value=$2
+  local description=$3
+  local applied
+
+  [[ -w $path ]] || {
+    echo "$description is not writable" >&2
+    return 1
+  }
+  if ! printf '%s\n' "$value" >"$path"; then
+    echo "Unable to change $description" >&2
+    return 1
+  fi
+  applied=$(<"$path")
+  if [[ $applied != "$value" ]]; then
+    echo "Dell firmware did not apply $description" >&2
+    return 1
+  fi
+}
+
+apply_custom_charging_thresholds() {
+  local attributes_dir=$1
+  local target_start=$2
+  local target_stop=$3
+  local start_path="$attributes_dir/CustomChargeStart/current_value"
+  local stop_path="$attributes_dir/CustomChargeStop/current_value"
+  local current_start
+  local current_stop
+
+  current_start=$(read_integer_attribute "$start_path" "Custom charge start") || return 1
+  current_stop=$(read_integer_attribute "$stop_path" "Custom charge stop") || return 1
+
+  # Keep a valid gap at every intermediate write. Dell rejects a start value
+  # too close to the current stop value, and likewise for a lowered stop.
+  if (( target_start > current_stop - 5 )); then
+    if (( target_stop != current_stop )); then
+      write_and_verify_attribute "$stop_path" "$target_stop" "the custom charge stop" || return 1
+    fi
+    if (( target_start != current_start )); then
+      write_and_verify_attribute "$start_path" "$target_start" "the custom charge start" || return 1
+    fi
+  else
+    if (( target_start != current_start )); then
+      write_and_verify_attribute "$start_path" "$target_start" "the custom charge start" || return 1
+    fi
+    if (( target_stop != current_stop )); then
+      write_and_verify_attribute "$stop_path" "$target_stop" "the custom charge stop" || return 1
+    fi
+  fi
+}
+
+firmware_charging_profile_for() {
+  case "$1" in
+    adaptive) printf 'Adaptive\n' ;;
+    standard) printf 'Standard\n' ;;
+    express) printf 'Express\n' ;;
+    primarily-ac) printf 'PrimAcUse\n' ;;
+    custom) printf 'Custom\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+charging_profile_available() {
+  local requested=$1
+  shift
+
+  [[ " $* " == *" $requested "* ]]
+}
+
+list_charging_profiles() {
+  local option=${1:-}
+  local attributes_dir
+  local current_profile
+  local custom_start=""
+  local custom_stop=""
+  local custom_start_min=""
+  local custom_start_max=""
+  local custom_start_increment=""
+  local custom_stop_min=""
+  local custom_stop_max=""
+  local custom_stop_increment=""
+  local profile
+  local firmware_profile
+  local active
+  local -a available_profiles
+
+  [[ -z $option || $option == "--active-state" ]] || {
+    echo "Usage: omarchy-dell-power-profiles charging list [--active-state]" >&2
+    return 1
+  }
+
+  attributes_dir=$(find_dell_charge_attributes_dir) || return 1
+  IFS=';' read -r -a available_profiles <"$attributes_dir/PrimaryBattChargeCfg/possible_values"
+  current_profile=$(<"$attributes_dir/PrimaryBattChargeCfg/current_value")
+
+  if load_custom_charging_metadata "$attributes_dir" 2>/dev/null; then
+    custom_start=$CUSTOM_CHARGE_START
+    custom_stop=$CUSTOM_CHARGE_STOP
+    custom_start_min=$CUSTOM_CHARGE_START_MIN
+    custom_start_max=$CUSTOM_CHARGE_START_MAX
+    custom_start_increment=$CUSTOM_CHARGE_START_INCREMENT
+    custom_stop_min=$CUSTOM_CHARGE_STOP_MIN
+    custom_stop_max=$CUSTOM_CHARGE_STOP_MAX
+    custom_stop_increment=$CUSTOM_CHARGE_STOP_INCREMENT
+  fi
+
+  for profile in adaptive standard express primarily-ac custom; do
+    firmware_profile=$(firmware_charging_profile_for "$profile") || continue
+    charging_profile_available "$firmware_profile" "${available_profiles[@]}" || continue
+
+    if [[ $option == "--active-state" ]]; then
+      active=0
+      [[ $firmware_profile == "$current_profile" ]] && active=1
+      if [[ $profile == "custom" ]]; then
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$profile" "$active" "$custom_start" "$custom_stop" \
+          "$custom_start_min" "$custom_start_max" "$custom_start_increment" \
+          "$custom_stop_min" "$custom_stop_max" "$custom_stop_increment"
+      else
+        printf '%s\t%s\n' "$profile" "$active"
+      fi
+    else
+      printf '%s\n' "$profile"
+    fi
+  done
+}
+
+probe_charging_profiles() {
+  find_dell_charge_attributes_dir >/dev/null
+}
+
+set_charging_profile() {
+  local requested_profile=${1:-}
+  local requested_start=${2:-}
+  local requested_stop=${3:-}
+  local attributes_dir
+  local firmware_profile
+  local current_profile
+  local previous_start=""
+  local previous_stop=""
+  local start_value
+  local stop_value
+  local -a available_profiles
+
+  if [[ $requested_profile == "custom" ]]; then
+    (( $# == 1 || $# == 3 )) || {
+      echo "Usage: omarchy-dell-power-profiles charging set custom [START STOP]" >&2
+      return 1
+    }
+  elif (( $# != 1 )); then
+    echo "Usage: omarchy-dell-power-profiles charging set adaptive|standard|express|primarily-ac" >&2
+    return 1
+  fi
+
+  firmware_profile=$(firmware_charging_profile_for "$requested_profile") || {
+    echo "Charging profile is not supported: $requested_profile" >&2
+    return 1
+  }
+
+  attributes_dir=$(find_dell_charge_attributes_dir) || {
+    echo "Dell charging-profile controls are unavailable" >&2
+    return 1
+  }
+  IFS=';' read -r -a available_profiles <"$attributes_dir/PrimaryBattChargeCfg/possible_values"
+  charging_profile_available "$firmware_profile" "${available_profiles[@]}" || {
+    echo "Charging profile is not available: $requested_profile" >&2
+    return 1
+  }
+
+  current_profile=$(<"$attributes_dir/PrimaryBattChargeCfg/current_value")
+
+  if (( $# == 3 )); then
+    load_custom_charging_metadata "$attributes_dir" || return 1
+    [[ -w $attributes_dir/CustomChargeStart/current_value && -w $attributes_dir/CustomChargeStop/current_value ]] || {
+      echo "Dell custom charging thresholds are not writable" >&2
+      return 1
+    }
+    [[ $requested_start =~ ^[0-9]+$ && $requested_stop =~ ^[0-9]+$ ]] || {
+      echo "Custom charging thresholds must be whole percentages" >&2
+      return 1
+    }
+
+    start_value=$(( 10#$requested_start ))
+    stop_value=$(( 10#$requested_stop ))
+    (( start_value >= CUSTOM_CHARGE_START_MIN && start_value <= CUSTOM_CHARGE_START_MAX )) || {
+      echo "Custom charge start must be between $CUSTOM_CHARGE_START_MIN% and $CUSTOM_CHARGE_START_MAX%" >&2
+      return 1
+    }
+    (( stop_value >= CUSTOM_CHARGE_STOP_MIN && stop_value <= CUSTOM_CHARGE_STOP_MAX )) || {
+      echo "Custom charge stop must be between $CUSTOM_CHARGE_STOP_MIN% and $CUSTOM_CHARGE_STOP_MAX%" >&2
+      return 1
+    }
+    (( (start_value - CUSTOM_CHARGE_START_MIN) % CUSTOM_CHARGE_START_INCREMENT == 0 )) || {
+      echo "Custom charge start must use ${CUSTOM_CHARGE_START_INCREMENT}% increments" >&2
+      return 1
+    }
+    (( (stop_value - CUSTOM_CHARGE_STOP_MIN) % CUSTOM_CHARGE_STOP_INCREMENT == 0 )) || {
+      echo "Custom charge stop must use ${CUSTOM_CHARGE_STOP_INCREMENT}% increments" >&2
+      return 1
+    }
+    (( stop_value >= start_value + 5 )) || {
+      echo "Custom charge stop must be at least 5% above the start" >&2
+      return 1
+    }
+
+    previous_start=$CUSTOM_CHARGE_START
+    previous_stop=$CUSTOM_CHARGE_STOP
+  fi
+
+  if [[ $current_profile != "$firmware_profile" ]]; then
+    if ! write_and_verify_attribute \
+      "$attributes_dir/PrimaryBattChargeCfg/current_value" \
+      "$firmware_profile" \
+      "the Dell charging profile"; then
+      return 1
+    fi
+  fi
+
+  (( $# == 3 )) || return 0
+
+  if ! apply_custom_charging_thresholds "$attributes_dir" "$start_value" "$stop_value"; then
+    apply_custom_charging_thresholds "$attributes_dir" "$previous_start" "$previous_stop" >/dev/null 2>&1 || true
+    if [[ $current_profile != "$firmware_profile" ]]; then
+      write_and_verify_attribute \
+        "$attributes_dir/PrimaryBattChargeCfg/current_value" \
+        "$current_profile" \
+        "the previous Dell charging profile" >/dev/null 2>&1 || true
+    fi
+    return 1
+  fi
 }
 
 set_os_profile() {
@@ -230,6 +517,27 @@ case "${1:-}" in
   set)
     shift
     set_profile "$@"
+    ;;
+  charging)
+    shift
+    case "${1:-}" in
+      probe)
+        (( $# == 1 )) || usage
+        probe_charging_profiles
+        ;;
+      list)
+        shift
+        (( $# <= 1 )) || usage
+        list_charging_profiles "${1:-}"
+        ;;
+      set)
+        shift
+        set_charging_profile "$@"
+        ;;
+      *)
+        usage
+        ;;
+    esac
     ;;
   --help | -h)
     usage 0

@@ -16,6 +16,12 @@ jq -e '
 grep -F 'command: ["omarchy-battery-status", "--shell"]' "$root/Panel.qml" >/dev/null
 grep -F '"/usr/bin/omarchy-dell-power-profiles", "set"' "$root/Panel.qml" >/dev/null
 grep -F 'omarchy-powerprofiles-list --active-state' "$root/Panel.qml" >/dev/null
+grep -F '"charging",' "$root/Panel.qml" >/dev/null
+grep -F 'id: chargingProfileDropdown' "$root/Panel.qml" >/dev/null
+grep -F 'id: customStartField' "$root/Panel.qml" >/dev/null
+grep -F 'id: customStopField' "$root/Panel.qml" >/dev/null
+grep -F 'BIOS limits:' "$root/Model.js" >/dev/null
+grep -F 'blocked: chargingProfileDropdown.popupOpen' "$root/Panel.qml" >/dev/null
 grep -F 'function togglePercentage()' "$root/Panel.qml" >/dev/null
 grep -F 'if (b === Qt.RightButton) root.togglePercentage()' "$root/Panel.qml" >/dev/null
 if grep -F 'omarchy-system-stats' "$root/Panel.qml" >/dev/null; then
@@ -88,6 +94,77 @@ assertEqual(
 )
 assertEqual(model.profileLabel('power-saver'), 'Power saver', 'plugin formats profile labels')
 assert(model.profileIcon('quiet').length > 0, 'plugin maps Dell profile icons')
+
+assertEqual(
+  model.parseChargingProfiles(
+    'adaptive\t1\nstandard\t0\nexpress\t0\nprimarily-ac\t0\ncustom\t0\t50\t90\t50\t95\t1\t55\t100\t1\n'
+  ),
+  {
+    profiles: ['adaptive', 'standard', 'express', 'primarily-ac', 'custom'],
+    activeProfile: 'adaptive',
+    backendState: 'ready',
+    customStart: '50',
+    customStop: '90',
+    customStartMin: '50',
+    customStartMax: '95',
+    customStartIncrement: '1',
+    customStopMin: '55',
+    customStopMax: '100',
+    customStopIncrement: '1'
+  },
+  'plugin parses Dell charging profiles and the custom range'
+)
+assertEqual(
+  model.parseChargingProfiles('__charging_backend_missing__\n').backendState,
+  'missing',
+  'plugin reports a missing charging-profile backend'
+)
+assertEqual(
+  model.parseChargingProfiles('__charging_provider_unavailable__\n').backendState,
+  'unavailable',
+  'plugin reports unavailable Dell charging controls'
+)
+assertEqual(
+  model.chargingProfileOptions(['adaptive', 'primarily-ac', 'custom'], '50', '80'),
+  [
+    { value: 'adaptive', label: 'Adaptive' },
+    { value: 'primarily-ac', label: 'Primarily AC' },
+    { value: 'custom', label: 'Custom · 50–80%' }
+  ],
+  'plugin formats charging profiles for the collapsed dropdown'
+)
+assert(
+  model.customChargingLimitsValid('50', '95', '1', '55', '100', '1'),
+  'plugin accepts the Dell custom charging metadata'
+)
+assertEqual(
+  model.normalizeCustomChargingThresholds(
+    '25%', '90', '50', '90', '50', '95', '1', '55', '100', '1', 'start'
+  ),
+  { start: '50', stop: '90', adjusted: true, valid: true },
+  'custom start text clamps 25% to the BIOS minimum of 50%'
+)
+assertEqual(
+  model.normalizeCustomChargingThresholds(
+    '95', '90', '50', '90', '50', '95', '1', '55', '100', '1', 'start'
+  ),
+  { start: '95', stop: '100', adjusted: true, valid: true },
+  'editing the start field raises stop to preserve the minimum gap'
+)
+assertEqual(
+  model.normalizeCustomChargingThresholds(
+    '90', '55', '90', '100', '50', '95', '1', '55', '100', '1', 'stop'
+  ),
+  { start: '50', stop: '55', adjusted: true, valid: true },
+  'editing the stop field lowers start to preserve the minimum gap'
+)
+assertEqual(
+  model.normalizeCustomChargingThresholds(
+    '60', '80', '50', '90', '50', '95', '1', '55', '100', '1', 'start'
+  ),
+  { start: '60', stop: '80', adjusted: false, valid: true },
+  'valid custom charging text remains unchanged'
+)
 
 assertEqual(
   model.parseKeyValue('time\t2:00\nenergy\t42\n'),

@@ -84,6 +84,63 @@ function parseProfiles(raw, previousIndex) {
   }
 }
 
+function parseChargingProfiles(raw) {
+  var lines = String(raw || "").split("\n")
+  var profiles = []
+  var activeProfile = ""
+  var backendState = "ready"
+  var customStart = ""
+  var customStop = ""
+  var customStartMin = ""
+  var customStartMax = ""
+  var customStartIncrement = ""
+  var customStopMin = ""
+  var customStopMax = ""
+  var customStopIncrement = ""
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim()
+    if (!line) continue
+
+    if (line === "__charging_backend_missing__") {
+      backendState = "missing"
+      continue
+    }
+    if (line === "__charging_provider_unavailable__") {
+      backendState = "unavailable"
+      continue
+    }
+
+    var parts = line.split("\t")
+    if (profiles.indexOf(parts[0]) < 0) profiles.push(parts[0])
+    if (parts[1] === "1") activeProfile = parts[0]
+    if (parts[0] === "custom") {
+      customStart = String(parts[2] || "").trim()
+      customStop = String(parts[3] || "").trim()
+      customStartMin = String(parts[4] || "").trim()
+      customStartMax = String(parts[5] || "").trim()
+      customStartIncrement = String(parts[6] || "").trim()
+      customStopMin = String(parts[7] || "").trim()
+      customStopMax = String(parts[8] || "").trim()
+      customStopIncrement = String(parts[9] || "").trim()
+    }
+  }
+
+  return {
+    profiles: profiles,
+    activeProfile: activeProfile,
+    backendState: backendState,
+    customStart: customStart,
+    customStop: customStop,
+    customStartMin: customStartMin,
+    customStartMax: customStartMax,
+    customStartIncrement: customStartIncrement,
+    customStopMin: customStopMin,
+    customStopMax: customStopMax,
+    customStopIncrement: customStopIncrement
+  }
+}
+
 function profileIcon(name) {
   if (name === "quiet" || name === "power-saver") return "󰌪"
   if (name === "cool") return "󰼶"
@@ -95,6 +152,123 @@ function profileIcon(name) {
 function profileLabel(name) {
   var value = String(name || "").replace(/-/g, " ")
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : ""
+}
+
+function chargingProfileLabel(name, customStart, customStop) {
+  if (name === "adaptive") return "Adaptive"
+  if (name === "standard") return "Standard"
+  if (name === "express") return "ExpressCharge"
+  if (name === "primarily-ac") return "Primarily AC"
+  if (name === "custom") {
+    var start = String(customStart || "").trim()
+    var stop = String(customStop || "").trim()
+    return start && stop ? "Custom · " + start + "–" + stop + "%" : "Custom"
+  }
+  return profileLabel(name)
+}
+
+function chargingProfileOptions(profiles, customStart, customStop) {
+  var values = Array.isArray(profiles) ? profiles : []
+  var options = []
+
+  for (var i = 0; i < values.length; i++) {
+    options.push({
+      value: values[i],
+      label: chargingProfileLabel(values[i], customStart, customStop)
+    })
+  }
+
+  return options
+}
+
+function percentageBounds(minimum, maximum, increment) {
+  var low = Number(minimum)
+  var high = Number(maximum)
+  var step = Number(increment)
+
+  if (!isFinite(low) || !isFinite(high) || !isFinite(step)
+      || Math.floor(low) !== low || Math.floor(high) !== high
+      || Math.floor(step) !== step || step <= 0 || low > high)
+    return null
+
+  return {
+    minimum: low,
+    maximum: low + Math.floor((high - low) / step) * step,
+    increment: step
+  }
+}
+
+function customChargingLimitsValid(startMinimum, startMaximum, startIncrement,
+                                   stopMinimum, stopMaximum, stopIncrement) {
+  var start = percentageBounds(startMinimum, startMaximum, startIncrement)
+  var stop = percentageBounds(stopMinimum, stopMaximum, stopIncrement)
+  return !!(start && stop && stop.maximum >= start.minimum + 5)
+}
+
+function percentageInput(raw, fallback) {
+  var match = String(raw || "").trim().match(/^([+-]?\d+)\s*%?$/)
+  var value = match ? Number(match[1]) : Number(fallback)
+  return {
+    value: isFinite(value) ? value : 0,
+    valid: !!match && isFinite(value)
+  }
+}
+
+function snapPercentage(value, bounds) {
+  var clamped = Math.max(bounds.minimum, Math.min(bounds.maximum, value))
+  var steps = Math.round((clamped - bounds.minimum) / bounds.increment)
+  return Math.max(
+    bounds.minimum,
+    Math.min(bounds.maximum, bounds.minimum + steps * bounds.increment)
+  )
+}
+
+function normalizeCustomChargingThresholds(startRaw, stopRaw, currentStart, currentStop,
+                                           startMinimum, startMaximum, startIncrement,
+                                           stopMinimum, stopMaximum, stopIncrement,
+                                           editedField) {
+  var startBounds = percentageBounds(startMinimum, startMaximum, startIncrement)
+  var stopBounds = percentageBounds(stopMinimum, stopMaximum, stopIncrement)
+  var startInput = percentageInput(startRaw, currentStart)
+  var stopInput = percentageInput(stopRaw, currentStop)
+
+  if (!startBounds || !stopBounds || stopBounds.maximum < startBounds.minimum + 5) {
+    return {
+      start: String(currentStart || ""),
+      stop: String(currentStop || ""),
+      adjusted: true,
+      valid: false
+    }
+  }
+
+  var start = snapPercentage(startInput.value, startBounds)
+  var stop = snapPercentage(stopInput.value, stopBounds)
+
+  if (editedField === "stop") {
+    while (start > stop - 5 && start - startBounds.increment >= startBounds.minimum)
+      start -= startBounds.increment
+    while (stop < start + 5 && stop + stopBounds.increment <= stopBounds.maximum)
+      stop += stopBounds.increment
+  } else {
+    while (stop < start + 5 && stop + stopBounds.increment <= stopBounds.maximum)
+      stop += stopBounds.increment
+    while (start > stop - 5 && start - startBounds.increment >= startBounds.minimum)
+      start -= startBounds.increment
+  }
+
+  return {
+    start: String(start),
+    stop: String(stop),
+    adjusted: !startInput.valid || !stopInput.valid
+      || startInput.value !== start || stopInput.value !== stop,
+    valid: stop >= start + 5
+  }
+}
+
+function customChargingLimitsLabel(startMinimum, startMaximum, stopMinimum, stopMaximum) {
+  return "BIOS limits: start " + startMinimum + "–" + startMaximum
+    + "%, stop " + stopMinimum + "–" + stopMaximum
+    + "% · minimum 5% gap. Out-of-range values are adjusted."
 }
 
 function batteryFraction(device) {
@@ -149,8 +323,14 @@ if (typeof module !== "undefined") {
     selectProfileIndexByDirection: selectProfileIndexByDirection,
     parseKeyValue: parseKeyValue,
     parseProfiles: parseProfiles,
+    parseChargingProfiles: parseChargingProfiles,
     profileIcon: profileIcon,
     profileLabel: profileLabel,
+    chargingProfileLabel: chargingProfileLabel,
+    chargingProfileOptions: chargingProfileOptions,
+    customChargingLimitsValid: customChargingLimitsValid,
+    normalizeCustomChargingThresholds: normalizeCustomChargingThresholds,
+    customChargingLimitsLabel: customChargingLimitsLabel,
     batteryFraction: batteryFraction,
     chargeThresholdActive: chargeThresholdActive,
     batteryIcon: batteryIcon,
