@@ -4,6 +4,8 @@ set -euo pipefail
 
 provider=${1:-./omarchy-dell-power-profiles}
 provider=$(realpath "$provider")
+permissions_helper=${2:-./omarchy-dell-power-profiles-permissions}
+permissions_helper=$(realpath "$permissions_helper")
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
@@ -171,6 +173,24 @@ fi
 [[ $(<"$profile_root/platform-profile-1/profile") == "quiet" ]] || fail "failed firmware write preserves the Dell mode"
 [[ $(<"$test_root/state/ac") == "quiet" ]] || fail "failed firmware write preserves the preference"
 pass "failed firmware writes roll back the OS mode"
+
+chmod 600 \
+  "$charge_attributes/PrimaryBattChargeCfg/current_value" \
+  "$charge_attributes/CustomChargeStart/current_value" \
+  "$charge_attributes/CustomChargeStop/current_value"
+OMARCHY_FIRMWARE_ATTRIBUTES_ROOT="$firmware_attributes_root" \
+OMARCHY_POWERPROFILES_ADMIN_GROUP="$(id -gn)" \
+  "$permissions_helper"
+for current_value in \
+  "$charge_attributes/PrimaryBattChargeCfg/current_value" \
+  "$charge_attributes/CustomChargeStart/current_value" \
+  "$charge_attributes/CustomChargeStop/current_value"; do
+  [[ $(stat -c %a "$current_value") == "660" ]] ||
+    fail "permission helper makes each Dell charging control group-writable"
+  [[ $(stat -c %G "$current_value") == "$(id -gn)" ]] ||
+    fail "permission helper assigns each Dell charging control to the administrator group"
+done
+pass "permission helper restores Dell charging access after boot"
 
 "$provider" charging probe || fail "provider detects writable Dell charging controls"
 pass "provider detects writable Dell charging controls"

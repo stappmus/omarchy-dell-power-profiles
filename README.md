@@ -47,10 +47,13 @@ The package installs:
 - `/usr/lib/udev/rules.d/99-omarchy-dell-platform-profile.rules`, which grants
   the `wheel` group access only to the Dell power-profile and battery-charging
   attributes used by the backend
+- `omarchy-dell-power-profiles-permissions.service`, a device-triggered
+  one-shot service that waits for Dell's charging attributes during boot and
+  applies their scoped permissions
 
-The package hook reloads and reapplies the udev rule immediately. Permissions
-are recreated normally at boot, and package removal restores the sysfs
-permissions it changed.
+The package hook reloads the udev rule and runs the one-shot service
+immediately. The firmware device starts it again at boot, and package removal
+restores the sysfs permissions it changed.
 
 ## Install the bar widget
 

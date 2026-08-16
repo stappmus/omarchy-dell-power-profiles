@@ -1,4 +1,10 @@
 reload_power_rules() {
+  local start_permissions=${1:-1}
+
+  if [[ -x /usr/bin/systemctl ]]; then
+    /usr/bin/systemctl daemon-reload || echo ":: Unable to reload systemd units for Dell power profiles." >&2
+  fi
+
   if [[ ! -x /usr/bin/udevadm || ! -S /run/udev/control ]]; then
     return 0
   fi
@@ -9,6 +15,11 @@ reload_power_rules() {
   /usr/bin/udevadm trigger --action=add --subsystem-match=firmware-attributes ||
     echo ":: Unable to reapply Dell charging-profile permissions; they will be applied after reboot." >&2
   /usr/bin/udevadm settle || true
+
+  if (( start_permissions )) && [[ -x /usr/bin/systemctl ]]; then
+    /usr/bin/systemctl start omarchy-dell-power-profiles-permissions.service ||
+      echo ":: Unable to apply Dell charging-profile permissions; they will be retried when the firmware device appears." >&2
+  fi
 }
 
 restore_platform_profile_permissions() {
@@ -46,7 +57,10 @@ post_upgrade() {
 }
 
 post_remove() {
+  if [[ -x /usr/bin/systemctl ]]; then
+    /usr/bin/systemctl stop omarchy-dell-power-profiles-permissions.service 2>/dev/null || true
+  fi
   restore_platform_profile_permissions
   restore_charging_profile_permissions
-  reload_power_rules
+  reload_power_rules 0
 }

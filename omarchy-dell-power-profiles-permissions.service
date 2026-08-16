@@ -1,0 +1,8 @@
+[Unit]
+Description=Grant local administrators access to Dell charging controls
+ConditionPathExists=/sys/class/firmware-attributes/dell-wmi-sysman
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10s
+ExecStart=/usr/lib/omarchy/dell-power-profiles/apply-charging-permissions

@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -uo pipefail
+
+firmware_attributes_root="${OMARCHY_FIRMWARE_ATTRIBUTES_ROOT:-/sys/class/firmware-attributes}"
+admin_group="${OMARCHY_POWERPROFILES_ADMIN_GROUP:-wheel}"
+attributes_dir="$firmware_attributes_root/dell-wmi-sysman/attributes"
+attempts=50
+delay=0.1
+declare -a current_values=(
+  "$attributes_dir/PrimaryBattChargeCfg/current_value"
+  "$attributes_dir/CustomChargeStart/current_value"
+  "$attributes_dir/CustomChargeStop/current_value"
+)
+
+for (( attempt = 1; attempt <= attempts; attempt++ )); do
+  ready=1
+  for current_value in "${current_values[@]}"; do
+    if [[ ! -e $current_value ]]; then
+      ready=0
+      break
+    fi
+  done
+
+  if (( ready )); then
+    /usr/bin/chgrp "$admin_group" "${current_values[@]}" || {
+      echo "Unable to grant $admin_group access to Dell charging controls" >&2
+      exit 1
+    }
+    /usr/bin/chmod g+rw "${current_values[@]}" || {
+      echo "Unable to make Dell charging controls group-writable" >&2
+      exit 1
+    }
+    exit 0
+  fi
+
+  (( attempt < attempts )) && /usr/bin/sleep "$delay"
+done
+
+echo "Dell charging controls did not appear after the firmware device was added" >&2
+exit 1
