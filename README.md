@@ -21,7 +21,7 @@ The provider coordinates each firmware mode with
 | Dell firmware mode | OS power profile |
 | --- | --- |
 | `quiet` | `power-saver` |
-| `cool` | `power-saver` |
+| `cool` | `balanced` |
 | `balanced` | `balanced` |
 | `performance` | `performance` |
 

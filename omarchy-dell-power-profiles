@@ -42,9 +42,11 @@ firmware_profile_available() {
 }
 
 os_profile_for() {
+  # Keep this aligned with power-profiles-daemon's platform-profile mapping.
   case "$1" in
-    quiet | cool) printf 'power-saver\n' ;;
-    balanced | performance) printf '%s\n' "$1" ;;
+    quiet) printf 'power-saver\n' ;;
+    cool | balanced) printf 'balanced\n' ;;
+    performance) printf 'performance\n' ;;
     *) return 1 ;;
   esac
 }
