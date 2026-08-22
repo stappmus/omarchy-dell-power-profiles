@@ -128,7 +128,7 @@ ON_BATTERY=1 "$provider" set
 [[ $(<"$profile_root/platform-profile-1/profile") == "quiet" ]] || fail "saved OS power-saver migrates to Dell quiet"
 pass "existing power-saver preferences migrate to Dell quiet"
 
-for mapping in "quiet power-saver" "cool power-saver" "balanced balanced" "performance performance"; do
+for mapping in "quiet power-saver" "cool balanced" "balanced balanced" "performance performance"; do
   read -r firmware_profile os_profile <<<"$mapping"
   previous_os_profile=$(<"$POWERPROFILES_OS_STATE")
   previous_call_count=$(wc -l <"$POWERPROFILES_LOG")

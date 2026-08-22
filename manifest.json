@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "stappmus.dell-power-profiles",
   "name": "Dell Power Panel",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "Kristoffer Haugland",
   "license": "MIT",
   "description": "A complete Omarchy battery panel with Dell power and charging profiles.",

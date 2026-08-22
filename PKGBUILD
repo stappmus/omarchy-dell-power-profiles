@@ -1,7 +1,7 @@
 # Maintainer: Kristoffer Haugland <stappmus at gmail dot com>
 
 pkgname=omarchy-dell-power-profiles
-pkgver=1.2.1
+pkgver=1.2.2
 pkgrel=1
 pkgdesc="Dell firmware power and charging-profile backend for Omarchy"
 arch=('any')
@@ -21,13 +21,13 @@ source=(
   'LICENSE'
 )
 sha256sums=(
-  'ebc806f8538e5f367680c85421580cbede04a334aaa1d3192beba4c7e7b0f76b'
+  '5b7640e85bebceb2ade4fb380b7fdadaeb8e04c1e5a7a506d62f37cf8ce9a9ce'
   'a88f514285dca91714ed913213180e07f31901489559f681c96cfa1b2b251cd2'
   'ff888b2e65b22de97ea909cf2f4399ac33f442b6b7a103df389733804eb79212'
   'c43b778c72f39feb5bf9e28606a8bd705fe83d1531b45dbb63278b532a10814a'
   '96a26d55e35855c53ebb844bcfb80f39a0d14b180e37536257de063ee9804a0f'
-  '33450f72561a6d7574a89a1827349672dec3ba5a93888c28f590f82a7c4da55b'
-  '23381278bee850260c69c5810baca4ba5ed782edb9b557633bb61a37341c55fa'
+  'be8b559337efc9ae6676a602252d93770f51a4f1416ec76fee89c026b6c4ba6b'
+  '2ea041a63217509ce738a0c7c65b9b2ea14022c6a6199569c3210712aaa1526a'
   '3a91944679bc66990c9d99d93a5521e61bdc46f33d31050a78fb3c00ca41ce35'
 )
 
